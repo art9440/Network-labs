@@ -35,12 +35,6 @@ type tcpServer struct {
 	listener                net.Listener
 }
 
-type Result struct {
-	info string
-	err  error
-	conn net.Conn
-}
-
 func StartServer(port string) error {
 	l, err := net.Listen(TYPE, HOST+":"+port)
 	if err != nil {
@@ -58,21 +52,6 @@ func (s *tcpServer) Serve() error {
 	ctx := context.Background()
 	sem := semaphore.NewWeighted(s.maxConcurrentConnection)
 
-	resultCh := make(chan Result, s.maxConcurrentConnection)
-
-	//goroutin for waiting respond from handle goroutin
-	go func() {
-		for result := range resultCh {
-			if result.err != nil {
-				fmt.Printf("%s: %v\n", result.info, result.err)
-				sendAnswer(false, result.conn)
-			} else {
-				sendAnswer(true, result.conn)
-			}
-			result.conn.Close()
-		}
-	}()
-
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
@@ -89,9 +68,8 @@ func (s *tcpServer) Serve() error {
 		//creating goroutin to handle connection
 		go func(c net.Conn) {
 			defer sem.Release(1)
-			s.handleConn(c, resultCh)
+			s.handleConn(c)
 		}(conn)
-
 	}
 }
 
@@ -113,20 +91,21 @@ func sendAnswer(success bool, conn net.Conn) {
 }
 
 // reading file stat
-func readInfo(c net.Conn, buf []byte, resultCh chan<- Result) bool {
+func readInfo(c net.Conn, buf []byte) bool {
 	if _, err := c.Read(buf); err != nil {
-		resultCh <- Result{info: "While reading file info", err: err, conn: c}
+		sendAnswer(false, c)
 		return false
 	}
 
 	return true
 }
 
-func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
+func (s *tcpServer) handleConn(c net.Conn) {
+	defer c.Close()
 	//reading header
 	var header [2]byte
 
-	if !readInfo(c, header[:], resultCh) {
+	if !readInfo(c, header[:]) {
 		return
 	}
 
@@ -135,7 +114,7 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 	//reading filename
 	bytesName := make([]byte, bytesNameLen)
 
-	if !readInfo(c, bytesName, resultCh) {
+	if !readInfo(c, bytesName) {
 		return
 	}
 
@@ -145,7 +124,7 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 	//creating file
 	file, err := createFile(filename)
 	if err != nil {
-		resultCh <- Result{info: "While creating file: " + filename, err: err, conn: c}
+		sendAnswer(false, c)
 		return
 	}
 
@@ -153,7 +132,7 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 
 	//reading file size
 	var fileSize [8]byte
-	if !readInfo(c, fileSize[:], resultCh) {
+	if !readInfo(c, fileSize[:]) {
 		return
 	}
 
@@ -189,13 +168,13 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 
 		n, err := io.ReadFull(c, buff[:readSize])
 		if err != nil {
-			resultCh <- Result{info: "While reading file", err: err, conn: c}
+			sendAnswer(false, c)
 			return
 		}
 
 		_, err = file.Write(buff[:n])
 		if err != nil {
-			resultCh <- Result{info: "Write to file failed", err: err, conn: c}
+			sendAnswer(false, c)
 			return
 		}
 
@@ -205,9 +184,9 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 	fmt.Println(" totalRead ", totalRead, " Size ", size)
 
 	if totalRead == size {
-		resultCh <- Result{info: "success", err: nil, conn: c}
+		sendAnswer(true, c)
 	} else {
-		resultCh <- Result{info: "failed", err: fmt.Errorf("size not equals"), conn: c}
+		sendAnswer(false, c)
 	}
 }
 
