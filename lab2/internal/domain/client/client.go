@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 )
 
-const chunksize = 256
-const maxFileSize = 1_099_511_627_776
+const (
+	chunksize   = 256
+	maxFileSize = 1_099_511_627_776
+)
 
 type Client interface {
 	UploadingFile(conn net.Conn) error

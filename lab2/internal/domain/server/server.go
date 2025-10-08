@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 )
@@ -17,6 +18,12 @@ import (
 const (
 	TYPE = "tcp"
 	HOST = "localhost"
+)
+
+const (
+	StatusSuccess = 0x01
+	StatusError   = 0x00
+	chunksize     = 256
 )
 
 type Server interface {
@@ -31,6 +38,7 @@ type tcpServer struct {
 type Result struct {
 	info string
 	err  error
+	conn net.Conn
 }
 
 func StartServer(port string) error {
@@ -50,7 +58,19 @@ func (s *tcpServer) Serve() error {
 	ctx := context.Background()
 	sem := semaphore.NewWeighted(s.maxConcurrentConnection)
 
-	resultCh := make(chan Result)
+	resultCh := make(chan Result, s.maxConcurrentConnection)
+
+	go func() {
+		for result := range resultCh {
+			if result.err != nil {
+				fmt.Printf("%s: %v\n", result.info, result.err)
+				sendAnswer(false, result.conn)
+			} else {
+				sendAnswer(true, result.conn)
+			}
+			result.conn.Close()
+		}
+	}()
 
 	for {
 		conn, err := s.listener.Accept()
@@ -70,21 +90,11 @@ func (s *tcpServer) Serve() error {
 			defer sem.Release(1)
 			s.handleConn(c, resultCh)
 		}(conn)
-		result := <-resultCh
-		if result.err != nil {
-			fmt.Println(result.info, "Something went wrong while handling: %v", err)
-			sendAnswer(false, conn)
-		} else {
-			sendAnswer(true, conn)
-		}
+
 	}
 }
 
-const (
-	StatusSuccess = 0x01
-	StatusError   = 0x00
-)
-
+// sending resond
 func sendAnswer(success bool, conn net.Conn) {
 	if success {
 		_, err := conn.Write([]byte{StatusSuccess})
@@ -101,12 +111,21 @@ func sendAnswer(success bool, conn net.Conn) {
 	}
 }
 
+// reading file stat
+func readInfo(c net.Conn, buf []byte, resultCh chan<- Result) bool {
+	if _, err := c.Read(buf); err != nil {
+		resultCh <- Result{info: "While reading file info", err: err, conn: c}
+		return false
+	}
+
+	return true
+}
+
 func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 	//reading header
 	var header [2]byte
 
-	if _, err := c.Read(header[:]); err != nil {
-		resultCh <- Result{info: "While reading header", err: err}
+	if !readInfo(c, header[:], resultCh) {
 		return
 	}
 
@@ -115,8 +134,7 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 	//reading filename
 	bytesName := make([]byte, bytesNameLen)
 
-	if _, err := c.Read(bytesName); err != nil {
-		resultCh <- Result{info: "While reading header", err: err}
+	if !readInfo(c, bytesName, resultCh) {
 		return
 	}
 
@@ -126,24 +144,40 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 	//creating file
 	file, err := createFile(filename)
 	if err != nil {
-		resultCh <- Result{info: "While creating file: " + filename, err: err}
+		resultCh <- Result{info: "While creating file: " + filename, err: err, conn: c}
 		return
 	}
 
 	defer file.Close()
+
 	//reading file size
 	var fileSize [8]byte
-
-	if _, err := c.Read(fileSize[:]); err != nil {
-		resultCh <- Result{info: "While reading file size", err: err}
+	if !readInfo(c, fileSize[:], resultCh) {
 		return
 	}
 
-	const chunksize = 256
 	size := binary.BigEndian.Uint64(fileSize[:])
 
 	var totalRead uint64 = 0
 	buff := make([]byte, chunksize)
+
+	var nowRead int = 0
+	startTime := time.Now()
+	//init ticker for speed statistics
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	//speed stat
+
+	go func() {
+		for range ticker.C {
+			instantSpeed := float64(nowRead) / 3.0
+			avgSpeed := float64(totalRead) / time.Since(startTime).Seconds()
+			fmt.Printf("File: %s. Speed( instant: %.1f | avg: %.1f KB/s)\n", filename, instantSpeed/1024, avgSpeed/1024)
+
+			nowRead = 0
+		}
+	}()
+
 	//reading file
 	for totalRead < size {
 		remaining := size - totalRead
@@ -154,27 +188,29 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 
 		n, err := io.ReadFull(c, buff[:readSize])
 		if err != nil {
-			resultCh <- Result{info: "While reading file", err: err}
+			resultCh <- Result{info: "While reading file", err: err, conn: c}
 			return
 		}
 
 		_, err = file.Write(buff[:n])
 		if err != nil {
-			resultCh <- Result{info: "Write to file failed", err: err}
+			resultCh <- Result{info: "Write to file failed", err: err, conn: c}
 			return
 		}
 
+		nowRead += n
 		totalRead += uint64(n)
 	}
 	fmt.Println(" totalRead ", totalRead, " Size ", size)
 
 	if totalRead == size {
-		resultCh <- Result{info: "success", err: nil}
+		resultCh <- Result{info: "success", err: nil, conn: c}
 	} else {
-		resultCh <- Result{info: "failed", err: fmt.Errorf("size not equals")}
+		resultCh <- Result{info: "failed", err: fmt.Errorf("size not equals"), conn: c}
 	}
 }
 
+// creating file
 func createFile(filename string) (*os.File, error) {
 	dir := "/home/art9440/VScodeProjects/GO/network-labs/lab2/internal/domain/server/uploads"
 
@@ -192,6 +228,7 @@ func createFile(filename string) (*os.File, error) {
 	return f, nil
 }
 
+// validating file name
 func safeBaseName(name string) (string, error) {
 	base := filepath.Base(strings.TrimSpace(name))
 	if base == "" || base == "." || base == ".." || base != name {
