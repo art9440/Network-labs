@@ -60,6 +60,7 @@ func (s *tcpServer) Serve() error {
 
 	resultCh := make(chan Result, s.maxConcurrentConnection)
 
+	//goroutin for waiting respond from handle goroutin
 	go func() {
 		for result := range resultCh {
 			if result.err != nil {
@@ -85,7 +86,7 @@ func (s *tcpServer) Serve() error {
 			fmt.Println("Something went wrong while acquiring semaphor")
 			continue
 		}
-
+		//creating goroutin to handle connection
 		go func(c net.Conn) {
 			defer sem.Release(1)
 			s.handleConn(c, resultCh)
@@ -166,8 +167,8 @@ func (s *tcpServer) handleConn(c net.Conn, resultCh chan Result) {
 	//init ticker for speed statistics
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
-	//speed stat
 
+	//speed stat
 	go func() {
 		for range ticker.C {
 			instantSpeed := float64(nowRead) / 3.0
