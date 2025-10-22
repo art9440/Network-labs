@@ -101,7 +101,6 @@ func searchFeatures(p geocode.Place, ctx context.Context) {
 		for i, loc := range locs {
 			fmt.Printf("%2d) %s (pageid=%s)\n", i+1, loc.Name, loc.ID)
 			if loc.Summary != "" {
-				// короткий обрез — чтобы не заливать весь экран
 				const maxLen = 220
 				sum := loc.Summary
 				if len([]rune(sum)) > maxLen {

@@ -24,7 +24,6 @@ type Location struct {
 	URL     string // канонический урл страницы
 }
 
-// --- RAW: геопоиск ---
 type wikiGeoResp struct {
 	Query struct {
 		Geosearch []struct {
@@ -34,7 +33,6 @@ type wikiGeoResp struct {
 	} `json:"query"`
 }
 
-// --- RAW: детали по набору pageids ---
 type wikiDetailsResp struct {
 	Query struct {
 		Pages map[string]struct {
