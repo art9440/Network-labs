@@ -14,6 +14,7 @@ func (c *GameClient) startAnnouncement() {
 		return
 	}
 
+	// перезапуск: гасим старый цикл
 	if c.announceStop != nil {
 		close(c.announceStop)
 	}
@@ -27,7 +28,11 @@ func (c *GameClient) startAnnouncement() {
 		for {
 			select {
 			case <-ticker.C:
-				// только мастер шлёт объявления
+				// жёсткие условия "игра жива"
+				if !c.isInGame() || c.game == nil || c.GameName == "" {
+					continue
+				}
+				// анонсы шлёт только мастер
 				if c.node.SelfRole != snakespb.NodeRole_MASTER {
 					continue
 				}
@@ -36,10 +41,8 @@ func (c *GameClient) startAnnouncement() {
 				if msg == nil {
 					continue
 				}
+				_ = c.network.SendToMulticast(msg)
 
-				if err := c.network.SendToMulticast(msg); err != nil {
-					fmt.Println("announce error:", err)
-				}
 			case <-stop:
 				return
 			}

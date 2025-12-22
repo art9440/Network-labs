@@ -10,10 +10,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// Handler — куда транспорт отдаёт уже распарсенные GameMessage
 type Handler interface {
 	HandlePacket(msg *snakespb.GameMessage, addr *net.UDPAddr)
 }
 
+// Transport — низкоуровневая сеть: UDP unicast + UDP multicast
 type Transport struct {
 	mcGroup string
 	mcPort  int
@@ -26,6 +28,7 @@ type Transport struct {
 	log *log.Logger
 }
 
+// NewTransport — поднимаем 2 UDP-сокета и запускаем 2 горутины чтения
 func NewTransport(h Handler, mcGroup string, mcPort int, logger *log.Logger) (*Transport, error) {
 	if logger == nil {
 		logger = log.Default()
@@ -37,17 +40,20 @@ func NewTransport(h Handler, mcGroup string, mcPort int, logger *log.Logger) (*T
 		log:     logger,
 	}
 
+	// 1) слушаем multicast-группу (приём discover/announcement)
 	var err error
 	t.mcConn, err = listenMulticast(mcGroup, mcPort)
 	if err != nil {
 		return nil, fmt.Errorf("multicast listen: %w", err)
 	}
 
+	// 2) обычный UDP-сокет для unicast (и им же отправляем multicast)
 	t.conn, err = listenUnicastAnyPort()
 	if err != nil {
 		return nil, fmt.Errorf("unicast listen: %w", err)
 	}
 
+	// отдельные циклы чтения для multicast и unicast
 	go t.readMulticastLoop()
 	go t.readUnicastLoop()
 
@@ -87,6 +93,7 @@ func listenUnicastAnyPort() (*net.UDPConn, error) {
 	return conn, nil
 }
 
+// readMulticastLoop — бесконечно читаем multicast и передаём в общий обработчик
 func (t *Transport) readMulticastLoop() {
 	buf := make([]byte, 64*1024)
 	for {
@@ -99,6 +106,7 @@ func (t *Transport) readMulticastLoop() {
 	}
 }
 
+// readUnicastLoop — бесконечно читаем unicast и передаём в общий обработчик
 func (t *Transport) readUnicastLoop() {
 	buf := make([]byte, 64*1024)
 	for {
@@ -110,16 +118,19 @@ func (t *Transport) readUnicastLoop() {
 	}
 }
 
+// handleRawPacket — общий разбор пакета: self-check -> proto.Unmarshal -> handler.HandlePacket
 func (t *Transport) handleRawPacket(data []byte, src *net.UDPAddr) {
 	if t.handler == nil {
 		return
 	}
 
+	// защита от “эхо”
 	if t.IsSelfPacketUnicast(src) {
 		t.log.Printf("RECV from=%s (self-packet) — ignored", src)
 		return
 	}
 
+	// декодируем protobuf GameMessage
 	var msg snakespb.GameMessage
 	if err := proto.Unmarshal(data, &msg); err != nil {
 		t.log.Printf("RECV from=%s unmarshal error: %v", src, err)
@@ -145,6 +156,7 @@ func (t *Transport) IsSelfPacketUnicast(src *net.UDPAddr) bool {
 	return src.IP.Equal(local.IP) && src.Port == local.Port
 }
 
+// SendTo — отправка unicast UDP пакета
 func (t *Transport) SendTo(msg *snakespb.GameMessage, addr *net.UDPAddr) error {
 	data, err := proto.Marshal(msg)
 	if err != nil {

@@ -10,18 +10,19 @@ import (
 
 type Coord struct{ X, Y int }
 
+// Game — доменная модель игры
 type Game struct {
-	cfg          GameConfig
-	Tick         int32
-	Players      map[int32]*Player
-	nextPlayerID int32
-	Snakes       map[int32]*Snake
+	cfg          GameConfig        // настройки: размер, еда, задержка
+	Tick         int32             // период тика в мс
+	Players      map[int32]*Player // все игроки (включая VIEWER)
+	nextPlayerID int32             // генератор id для новых игроков
+	Snakes       map[int32]*Snake  // змейки по playerID
 
-	Board *Board
+	Board *Board // поле клеток
 
 	Rand *rand.Rand
 
-	JoinOrder []int32
+	JoinOrder []int32 // порядок входа: нужен для выбора deputy
 }
 
 func NewGame(cfg GameConfig) *Game {
@@ -45,6 +46,7 @@ func (g *Game) Config() GameConfig {
 	return g.cfg
 }
 
+// AddFirstPlayer — добавление первого игрока (он MASTER)
 func (g *Game) AddFirstPlayer(name string) int32 {
 	id := g.nextPlayerID
 	g.nextPlayerID++
@@ -64,6 +66,7 @@ func (g *Game) AddPlayerWithRole(name string, role snakespb.NodeRole) int32 {
 	return id
 }
 
+// ChooseDeputy — выбрать deputy среди NORMAL игроков (по JoinOrder)
 func (g *Game) ChooseDeputy(masterID int32) (int32, bool) {
 	for _, id := range g.JoinOrder {
 		if id == masterID {
@@ -100,6 +103,7 @@ func (g *Game) isAreaFree(x, y int) bool {
 	return true
 }
 
+// стартовая еда = FoodStatic + число змей
 func (g *Game) InitFood() {
 	target := g.cfg.FoodStatic + len(g.Snakes)
 
@@ -108,6 +112,7 @@ func (g *Game) InitFood() {
 	}
 }
 
+// SpawnFood — ставим еду в случайную пустую клетку
 func (g *Game) SpawnFood() error {
 	for tries := 0; tries < 1000; tries++ {
 		x := g.Rand.Intn(g.Board.Width)
@@ -122,6 +127,7 @@ func (g *Game) SpawnFood() error {
 	return fmt.Errorf("no place to spawn food")
 }
 
+// nextHead — куда попадёт голова при движении
 func (g *Game) nextHead(head Coord, dir Direction) Coord {
 	x, y := head.X, head.Y
 	switch dir {
@@ -138,6 +144,7 @@ func (g *Game) nextHead(head Coord, dir Direction) Coord {
 	return Coord{X: x, Y: y}
 }
 
+// oppositeDir — направление “назад” (чтобы запретить разворот)
 func oppositeDir(d Direction) Direction {
 	switch d {
 	case DirUp:
@@ -163,72 +170,153 @@ func (g *Game) SetDirection(newDir Direction, id int32) {
 	g.Snakes[id].Direction = newDir
 }
 
+// MoveSnakes — один шаг симуляции змей (двухфазно):
+//  1. собираем intent всех змей (куда пойдут)
+//  2. определяем смерти (конфликт голов / удар в тело)
+//  3. двигаем живых (хвосты/рост)
+//  4. мёртвых чистим и с p=0.5 превращаем клетки в еду
 func (g *Game) MoveSnakes() bool {
 	if len(g.Snakes) == 0 {
 		return false
 	}
 
-	// сюда запишем id змеек, которые умерли
-	var dead []int32
+	type intent struct {
+		id       int32
+		snake    *Snake
+		newHead  Coord
+		willGrow bool
+		tail     Coord
+	}
+
+	// снимок поля до хода
+	oldCells := make([]CellType, len(g.Board.Cells))
+	copy(oldCells, g.Board.Cells)
+
+	// 1) собираем намерения ходов
+	intents := make([]intent, 0, len(g.Snakes))
+	targetMap := make(map[int]int)     // idx -> count
+	targetIDs := make(map[int][]int32) // idx -> ids
+
+	tailsToFree := make(map[int]int32) // idx хвоста -> id змеи (если она НЕ растёт)
 
 	for id, s := range g.Snakes {
 		if s == nil || len(s.Body) == 0 {
-			dead = append(dead, id)
 			continue
 		}
 
 		head := s.Body[0]
 		newHead := g.nextHead(head, s.Direction)
 		newIdx := g.Board.Idx(newHead.X, newHead.Y)
-		cell := g.Board.Cells[newIdx]
 
-		switch cell {
-		case CellEmpty:
-			// обычный ход: очищаем хвост, добавляем новую голову
-			tail := s.Body[len(s.Body)-1]
-			g.Board.Cells[g.Board.Idx(tail.X, tail.Y)] = CellEmpty
+		willGrow := (oldCells[newIdx] == CellFood)
+		tail := s.Body[len(s.Body)-1]
 
-			s.Body = append([]Coord{newHead}, s.Body[:len(s.Body)-1]...)
-			g.Board.Cells[newIdx] = CellSnake
+		intents = append(intents, intent{
+			id:       id,
+			snake:    s,
+			newHead:  newHead,
+			willGrow: willGrow,
+			tail:     tail,
+		})
 
-		case CellFood:
-			// съели еду: просто добавляем голову, хвост не убираем
-			s.Body = append([]Coord{newHead}, s.Body...)
-			g.Board.Cells[newIdx] = CellSnake
+		targetMap[newIdx]++
+		targetIDs[newIdx] = append(targetIDs[newIdx], id)
 
-			if p, ok := g.Players[s.PlayerID]; ok && p != nil {
-				p.Score++
-			} else {
-				// тут можно залогировать, что не нашли игрока по PlayerID
-				// fmt.Println("no player for snake", s.PlayerID)
-			}
-
-			_ = g.SpawnFood() // можно обработать ошибку
-
-		case CellSnake:
-			// столкновение: змея умирает
-			killerID, err := g.findKiller(newHead)
-			if err != nil {
-				//TODO: добавить логирование о том, что очко не присуждается никому
-			} else {
-				g.Players[killerID].Score++
-			}
-			for _, c := range s.Body {
-				g.Board.Cells[g.Board.Idx(c.X, c.Y)] = CellEmpty
-			}
-			dead = append(dead, id)
-
-		default:
-			// на всякий случай считаем это смертью
-			for _, c := range s.Body {
-				g.Board.Cells[g.Board.Idx(c.X, c.Y)] = CellEmpty
-			}
-			dead = append(dead, id)
+		if !willGrow {
+			tailsToFree[g.Board.Idx(tail.X, tail.Y)] = id
 		}
 	}
 
-	for _, id := range dead {
-		delete(g.Snakes, id)
+	// 2) определяем смерти
+	dead := make(map[int32]bool)
+
+	// 2.1) конфликт голов: несколько змей в одну клетку => все умирают
+	for idx, cnt := range targetMap {
+		if cnt > 1 {
+			for _, id := range targetIDs[idx] {
+				dead[id] = true
+			}
+		}
+	}
+
+	// 2.2) столкновения в тело (с учётом освобождающегося хвоста)
+	for _, in := range intents {
+		if dead[in.id] {
+			continue
+		}
+		newIdx := g.Board.Idx(in.newHead.X, in.newHead.Y)
+		cell := oldCells[newIdx]
+
+		if cell == CellSnake {
+			// разрешаем "въезд в хвост", который уедет в этот же тик
+			if owner, ok := tailsToFree[newIdx]; ok {
+				// если хвост уезжает и его владелец сам не умер — разрешаем
+				if !dead[owner] {
+					continue
+				}
+			}
+			// иначе смерть
+			dead[in.id] = true
+
+			// начисление очка убийце (если нашли)
+			killerID, err := g.findKiller(in.newHead)
+			if err == nil {
+				if p := g.Players[killerID]; p != nil {
+					p.Score++
+				}
+			}
+		}
+	}
+
+	// 3) применяем движения живых: сначала освобождаем хвосты у тех, кто не растёт и не умер
+	for _, in := range intents {
+		if dead[in.id] {
+			continue
+		}
+		if !in.willGrow {
+			tidx := g.Board.Idx(in.tail.X, in.tail.Y)
+			g.Board.Cells[tidx] = CellEmpty
+		}
+	}
+
+	// затем двигаем живых
+	for _, in := range intents {
+		if dead[in.id] {
+			continue
+		}
+
+		newIdx := g.Board.Idx(in.newHead.X, in.newHead.Y)
+
+		if in.willGrow {
+			// съели еду: добавляем голову, хвост не трогаем
+			in.snake.Body = append([]Coord{in.newHead}, in.snake.Body...)
+			g.Board.Cells[newIdx] = CellSnake
+
+			if p := g.Players[in.id]; p != nil {
+				p.Score++
+			}
+			_ = g.SpawnFood()
+		} else {
+			// обычный ход: добавляем голову, хвост уже очищен выше
+			in.snake.Body = append([]Coord{in.newHead}, in.snake.Body[:len(in.snake.Body)-1]...)
+			g.Board.Cells[newIdx] = CellSnake
+		}
+	}
+
+	// 4) обрабатываем мёртвых: очищаем тело, затем 0.5 клеток -> еда
+	for _, in := range intents {
+		if !dead[in.id] {
+			continue
+		}
+		// очищаем тело
+		for _, c := range in.snake.Body {
+			g.Board.Cells[g.Board.Idx(c.X, c.Y)] = CellEmpty
+		}
+		// превращаем в еду с p=0.5
+		g.snakeToFoodHalf(in.snake.Body)
+
+		// удаляем змею
+		delete(g.Snakes, in.id)
 	}
 
 	return len(g.Snakes) > 0
@@ -236,6 +324,7 @@ func (g *Game) MoveSnakes() bool {
 
 var errNoKiller = fmt.Errorf("cant find killer")
 
+// findKiller — кто владел клеткой столкновения (для начисления очка)
 func (g *Game) findKiller(collisionCoord Coord) (int32, error) {
 	for id, s := range g.Snakes {
 		if s == nil || len(s.Body) == 0 {
@@ -251,6 +340,7 @@ func (g *Game) findKiller(collisionCoord Coord) (int32, error) {
 	return 0, errNoKiller
 }
 
+// OneTick — один тик игры
 func (g *Game) OneTick() bool {
 	alive := g.MoveSnakes()
 
@@ -259,6 +349,7 @@ func (g *Game) OneTick() bool {
 
 var errNoPlace = fmt.Errorf("no place to spawn snake")
 
+// findSpawnPosition — находим безопасную позицию для спавна змеи
 func (g *Game) findSpawnPosition() (head Coord, tail Coord, dir Direction, ok bool) {
 	for tries := 0; tries < 1000; tries++ {
 		x := g.Rand.Intn(g.Board.Width)
@@ -317,14 +408,23 @@ func (g *Game) SpawnSnake(id int32) error {
 	return nil
 }
 
+// CheckCanJoin — можно ли ещё кого-то заспавнить (есть ли место)
 func (g *Game) CheckCanJoin() bool {
 	_, _, _, ok := g.findSpawnPosition()
 	return ok
 }
 
+// PlayersSnapshot — список игроков для рейтинга
 func (g *Game) PlayersSnapshot() []PlayerInfo {
 	res := make([]PlayerInfo, 0, len(g.Players))
 	for _, p := range g.Players {
+		if p == nil {
+			continue
+		}
+		// исключаем VIEWER из рейтинга/списков
+		if p.Role == snakespb.NodeRole_VIEWER {
+			continue
+		}
 		res = append(res, PlayerInfo{
 			ID:    p.ID,
 			Name:  p.Name,
@@ -340,4 +440,37 @@ func (g *Game) PlayersSnapshot() []PlayerInfo {
 	})
 
 	return res
+}
+
+// NextPlayerIDFix — поднимаем nextPlayerID до нужного значения
+func (g *Game) NextPlayerIDFix(v int32) {
+	if v > g.nextPlayerID {
+		g.nextPlayerID = v
+	}
+}
+
+// snakeToFoodHalf — при смерти змеи: каждую клетку тела с p=0.5 превращаем в еду
+func (g *Game) snakeToFoodHalf(body []Coord) {
+	for _, c := range body {
+		if g.Rand.Float64() < 0.5 {
+			idx := g.Board.Idx(c.X, c.Y)
+			// не затираем змею/еду, ставим еду только в пустую клетку
+			if g.Board.Cells[idx] == CellEmpty {
+				g.Board.Cells[idx] = CellFood
+			}
+		}
+	}
+}
+
+// MasterName — имя текущего ведущего (по роли MASTER), для UI
+func (g *Game) MasterName() string {
+	if g == nil {
+		return ""
+	}
+	for _, p := range g.Players {
+		if p != nil && p.Role == snakespb.NodeRole_MASTER {
+			return p.Name
+		}
+	}
+	return ""
 }

@@ -7,43 +7,6 @@ import (
 	"time"
 )
 
-func (c *GameClient) startMonitorLoop() {
-	if c.game == nil {
-		return
-	}
-
-	// остановить старый, если был
-	if c.monitorStop != nil {
-		close(c.monitorStop)
-	}
-	stop := make(chan struct{})
-	c.monitorStop = stop
-
-	delayMs := c.game.Config().StateDelayMs
-	if delayMs <= 0 {
-		delayMs = 1000
-	}
-
-	interval := time.Duration(delayMs/10) * time.Millisecond
-	if interval <= 0 {
-		interval = 100 * time.Millisecond
-	}
-
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				c.monitorTick(interval)
-			case <-stop:
-				return
-			}
-		}
-	}()
-}
-
 func (c *GameClient) StopGame() {
 	if c.tickerStop != nil {
 		close(c.tickerStop)
@@ -53,18 +16,56 @@ func (c *GameClient) StopGame() {
 		close(c.monitorStop)
 		c.monitorStop = nil
 	}
+	if c.reliabilityStop != nil {
+		close(c.reliabilityStop)
+		c.reliabilityStop = nil
+	}
+
 	c.stopAnnouncement()
 	c.stopSendWorkers()
+
+	// чтобы после выхода не летели старые ретраи/ping’и
+	c.clearAllPending(fmt.Errorf("game stopped"))
+
 	c.game = nil
+
+	c.setInGame(false)
 }
 
 func (c *GameClient) stopSendWorkers() {
-	// закрывать sendQ не обязательно; просто гасим воркеры
+	if c.sendStop == nil {
+		return
+	}
 	select {
 	case <-c.sendStop:
-		return
+		// уже закрыт
 	default:
 		close(c.sendStop)
+	}
+	c.sendStop = nil
+}
+
+func (c *GameClient) ensureSendWorkers() {
+	if c.sendStop != nil {
+		return // уже есть живые воркеры
+	}
+	c.sendStop = make(chan struct{})
+	c.startSendWorkers(4)
+}
+
+func (c *GameClient) makeSnakeZombie(id int32) {
+	if c.game == nil {
+		return
+	}
+
+	// Змея становится зомби, если есть
+	if s, ok := c.game.Snakes[id]; ok && s != nil {
+		s.State = domain.SnakeZombie
+	}
+
+	// Игрок перестаёт быть NORMAL, становится VIEWER
+	if p, ok := c.game.Players[id]; ok && p != nil {
+		p.Role = snakespb.NodeRole_VIEWER
 	}
 }
 
@@ -95,48 +96,16 @@ func (c *GameClient) StartGame() {
 				if c.game == nil {
 					continue
 				}
+				c.applyPendingSteer()
 				alive := c.game.OneTick()
 				c.broadcastState()
 				c.view.RefreshBoard()
 				c.view.RefreshRating()
-				if !alive {
-					c.BackToStart()
-					return
-				}
+
+				_ = alive
 			case <-c.tickerStop:
 				return
 			}
 		}
 	}()
-}
-
-func (c *GameClient) ChangeDirection(dir domain.Direction) {
-	switch c.node.SelfRole {
-	case snakespb.NodeRole_MASTER:
-		// локальная игра – просто правим своё состояние
-		if c.game == nil {
-			return
-		}
-		c.game.SetDirection(dir, c.node.SelfID)
-
-	case snakespb.NodeRole_NORMAL:
-		// обычный игрок – шлём Steer мастеру
-		if c.node.MasterAddr == nil {
-			return // ещё не знаем, куда слать
-		}
-
-		msg := c.buildSteerMessage(dir)
-		if msg == nil {
-			return
-		}
-
-		retry := time.Duration(c.game.Config().StateDelayMs/10) * time.Millisecond
-		if retry <= 0 {
-			retry = 100 * time.Millisecond
-		}
-		c.enqueueReliable(msg, c.node.MasterAddr, c.node.MasterID, retry, 3)
-
-	default:
-		// VIEWER или что-то странное — не имеет змеи, игнорим
-	}
 }

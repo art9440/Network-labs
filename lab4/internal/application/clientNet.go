@@ -5,91 +5,19 @@ import (
 	snakespb "lab4/internal/infrastructure/proto"
 	"net"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 )
 
-func (c *GameClient) HandlePacket(msg *snakespb.GameMessage, addr *net.UDPAddr) {
-	senderID := msg.GetSenderId()
-	if senderID != 0 {
-		c.notePlayerHeard(senderID)
-	}
-
-	c.log.Printf("RECV from=%s seq=%d type=%s", addr, msg.GetMsgSeq(), MsgTypeName(msg))
-
-	switch m := msg.Type.(type) {
-	case *snakespb.GameMessage_Announcement:
-		c.handleAnnouncement(m.Announcement, addr)
-		if c.view != nil {
-			c.view.RefreshGamesList()
-			c.view.RefreshAvailableGames()
-		}
-
-	case *snakespb.GameMessage_Discover:
-		msg := c.buildAnnouncementMessage()
-		if msg == nil {
-			return
-		}
-		if c.view != nil {
-			_ = c.network.SendTo(msg, addr)
-			// Discover не привязан к player_id, markSent не нужен
-		}
-
-	case *snakespb.GameMessage_Join:
-		playerID, err := c.TryToJoin(m.Join, addr)
-		if err != nil {
-			ack := c.buildAckMessage(msg.GetMsgSeq(), 0)
-			if err2 := c.network.SendTo(ack, addr); err2 == nil {
-				// id игрока ещё нет – некого отмечать
-			}
-
-			errMsg := c.buildErrorMessage(msg.GetMsgSeq(), err.Error())
-			if errMsg != nil {
-				_ = c.network.SendTo(errMsg, addr)
-			}
-			return
-		}
-
-		ack := c.buildAckMessage(msg.GetMsgSeq(), playerID)
-		if err := c.network.SendTo(ack, addr); err == nil {
-			c.markSent(playerID)
-		}
-
-	case *snakespb.GameMessage_Ack:
-		c.handleAck(msg)
-
-	case *snakespb.GameMessage_Error:
-		ack := c.buildAckMessage(msg.GetMsgSeq(), c.node.SelfID)
-		if err := c.network.SendTo(ack, addr); err == nil {
-			c.markSent(msg.GetSenderId())
-		}
-		c.handleError(msg, m, addr)
-
-	case *snakespb.GameMessage_State:
-		ack := c.buildAckMessage(msg.GetMsgSeq(), c.node.SelfID)
-		if err := c.network.SendTo(ack, addr); err == nil {
-			c.markSent(msg.GetSenderId())
-		}
-		c.handleState(m.State)
-
-	case *snakespb.GameMessage_Steer:
-		ack := c.buildAckMessage(msg.GetMsgSeq(), msg.GetSenderId())
-		if err := c.network.SendTo(ack, addr); err == nil {
-			c.markSent(msg.GetSenderId())
-		}
-		c.handleSteer(m.Steer, msg)
-
-	case *snakespb.GameMessage_Ping:
-		ack := c.buildAckMessage(msg.GetMsgSeq(), c.node.SelfID)
-		if err := c.network.SendTo(ack, addr); err == nil {
-			c.markSent(msg.GetSenderId())
-		}
-		c.notePlayerHeard(msg.GetSenderId())
-	case *snakespb.GameMessage_RoleChange:
-
-	default:
-		c.log.Printf("unknown msg type: %T", m)
-	}
+// nextSeq — атомарно увеличивает и возвращает msg_seq
+func (c *GameClient) nextSeq() int64 {
+	c.seqMu.Lock()
+	defer c.seqMu.Unlock()
+	c.seq++
+	return c.seq
 }
 
+// markSent — отмечаем, что мы что-то отправили игроку
 func (c *GameClient) markSent(id int32) {
 	if id == 0 {
 		return
@@ -103,23 +31,14 @@ func (c *GameClient) markSent(id int32) {
 	c.lastSent[id] = time.Now()
 }
 
-func (c *GameClient) notePlayerHeard(id int32) {
-	if id == 0 {
-		return
-	}
-	c.playerAddrsMu.Lock()
-	defer c.playerAddrsMu.Unlock()
-
-	if c.lastHeard == nil {
-		c.lastHeard = make(map[int32]time.Time)
-	}
-	c.lastHeard[id] = time.Now()
-}
-
+// sendReliable — синхронная надёжная отправка:
+//   - шлём сообщение
+//   - ждём Ack
+//   - делаем ретраи
 func (c *GameClient) sendReliable(
 	msg *snakespb.GameMessage,
 	addr *net.UDPAddr,
-	peerID int32, // <- добавили
+	peerID int32,
 	retryInterval time.Duration,
 	maxAttempts int,
 ) error {
@@ -129,23 +48,30 @@ func (c *GameClient) sendReliable(
 		msg.MsgSeq = &seq
 	}
 
-	ch := make(chan struct{})
+	pi := &pendingItem{done: make(chan error, 1)}
 
 	c.pendingMu.Lock()
 	if c.pending == nil {
-		c.pending = make(map[int64]chan struct{})
+		c.pending = make(map[int64]*pendingItem)
 	}
-	c.pending[seq] = ch
+	c.pending[seq] = pi
 	c.pendingMu.Unlock()
 
+	// если выходим по таймауту/ошибке — сами завершим pending
 	defer func() {
+		// если ack уже пришёл, completePending уже удалил запись — ок
 		c.pendingMu.Lock()
-		delete(c.pending, seq)
+		_, still := c.pending[seq]
 		c.pendingMu.Unlock()
+		if still {
+			c.completePending(seq, fmt.Errorf("no ack for seq=%d after %d attempts", seq, maxAttempts))
+		}
 	}()
 
+	// цикл ретраев
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if err := c.network.SendTo(msg, addr); err != nil {
+			c.completePending(seq, err)
 			return fmt.Errorf("send seq=%d attempt=%d: %w", seq, attempt+1, err)
 		}
 
@@ -153,61 +79,130 @@ func (c *GameClient) sendReliable(
 			c.markSent(peerID)
 		}
 
+		// ждём либо Ack, либо таймаут
 		select {
-		case <-ch:
-			return nil
+		case err := <-pi.done:
+			return err // nil если ok
 		case <-time.After(retryInterval):
-			// идём на следующую попытку
+			// retry
 		}
 	}
 
 	return fmt.Errorf("no ack for seq=%d after %d attempts", seq, maxAttempts)
 }
 
-func (c *GameClient) startSendWorkers(n int) {
-	for i := 0; i < n; i++ {
-		go func(workerID int) {
-			for {
-				select {
-				case job := <-c.sendQ:
-					if job.addr == nil || job.msg == nil {
-						continue
-					}
+// reliableSendAsync — асинхронная надёжная отправка:
+//   - сразу возвращаемся
+//   - Ack придёт в канал done
+//   - ретраи делает reliability loop
+func (c *GameClient) reliableSendAsync(
+	msg *snakespb.GameMessage,
+	addr *net.UDPAddr,
+	peerID int32,
+	retry time.Duration,
+	attempts int,
+) (int64, <-chan error, error) {
 
-					if job.reliable {
-						_ = c.sendReliable(job.msg, job.addr, job.peerID, job.retryInterval, job.maxAttempts)
-					} else {
-						// “быстрая” отправка без ожидания Ack
-						if err := c.network.SendTo(job.msg, job.addr); err == nil && job.peerID != 0 {
-							c.markSent(job.peerID)
-						}
-					}
+	if addr == nil || msg == nil {
+		return 0, nil, fmt.Errorf("nil addr/msg")
+	}
 
-				case <-c.sendStop:
-					return
-				}
-			}
-		}(i)
+	seq := msg.GetMsgSeq()
+	if seq == 0 {
+		seq = c.nextSeq()
+		msg.MsgSeq = &seq
+	}
+
+	if retry <= 0 {
+		retry = 100 * time.Millisecond
+	}
+
+	// pendingItem хранит всё для повторных отправок
+	pi := &pendingItem{
+		seq:          seq,
+		msg:          proto.Clone(msg).(*snakespb.GameMessage), // копия!
+		addr:         copyUDPAddr(addr),
+		peerID:       peerID,
+		retryEvery:   retry,
+		nextSend:     time.Now(), // сразу отправить
+		attemptsLeft: attempts,
+		done:         make(chan error, 1),
+	}
+
+	c.pendingMu.Lock()
+	if c.pending == nil {
+		c.pending = make(map[int64]*pendingItem)
+	}
+	c.pending[seq] = pi
+	c.pendingMu.Unlock()
+
+	//первая отправка сразу
+	c.enqueueUnreliable(pi.msg, pi.addr, pi.peerID)
+
+	return seq, pi.done, nil
+}
+
+func copyUDPAddr(a *net.UDPAddr) *net.UDPAddr {
+	if a == nil {
+		return nil
+	}
+	cp := *a
+	return &cp
+}
+
+// reliableSendWait — удобный helper:
+// асинхронная отправка + ожидание Ack с общим таймаутом
+func (c *GameClient) reliableSendWait(
+	msg *snakespb.GameMessage,
+	addr *net.UDPAddr,
+	peerID int32,
+	retry time.Duration,
+	attempts int,
+	waitTotal time.Duration, // общий таймаут ожидания (например 2*stateDelay)
+) error {
+	_, done, err := c.reliableSendAsync(msg, addr, peerID, retry, attempts)
+	if err != nil {
+		return err
+	}
+
+	if waitTotal <= 0 {
+		waitTotal = 2 * time.Second
+	}
+
+	select {
+	case e := <-done:
+		return e
+	case <-time.After(waitTotal):
+		return fmt.Errorf("timeout waiting ack")
 	}
 }
 
-func (c *GameClient) enqueueReliable(msg *snakespb.GameMessage, addr *net.UDPAddr, peerID int32, retry time.Duration, attempts int) {
-	select {
-	case c.sendQ <- sendJob{
-		msg: msg, addr: addr, peerID: peerID,
-		retryInterval: retry, maxAttempts: attempts,
-		reliable: true,
-	}:
-	default:
-		// очередь переполнена — лучше дропнуть, чем плодить горутины
-		c.log.Printf("sendQ overflow: drop reliable msg type=%s", MsgTypeName(msg))
+// reroutePending — при смене мастера:
+// все pending-сообщения старому мастеру
+// перенаправляем новому мастеру
+func (c *GameClient) reroutePending(oldPeerID, newPeerID int32, newAddr *net.UDPAddr) {
+	if oldPeerID == 0 || newPeerID == 0 || newAddr == nil {
+		return
 	}
-}
 
-func (c *GameClient) enqueueUnreliable(msg *snakespb.GameMessage, addr *net.UDPAddr, peerID int32) {
-	select {
-	case c.sendQ <- sendJob{msg: msg, addr: addr, peerID: peerID, reliable: false}:
-	default:
-		c.log.Printf("sendQ overflow: drop msg type=%s", MsgTypeName(msg))
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+
+	for _, pi := range c.pending {
+		if pi == nil {
+			continue
+		}
+		if pi.peerID != oldPeerID {
+			continue
+		}
+
+		pi.peerID = newPeerID
+		pi.addr = copyUDPAddr(newAddr)
+		pi.nextSend = time.Now()
+
+		//если сообщение было адресовано старому мастеру — перепишем receiver_id
+		if pi.msg != nil && pi.msg.GetReceiverId() == oldPeerID {
+			pi.msg.ReceiverId = proto.Int32(newPeerID)
+		}
 	}
 }

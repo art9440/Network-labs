@@ -42,8 +42,10 @@ func NewFyneView(a fyne.App, w fyne.Window, client *application.GameClient) *Fyn
 	}
 }
 
+// показ стартового окна
 func (v *FyneView) ShowStartMenu() {
 	fyne.Do(func() {
+		v.window.Canvas().SetOnTypedKey(nil)
 		startContent := container.NewVBox(
 			widget.NewButton("Создать игру", func() {
 				v.client.CreateGame()
@@ -57,11 +59,22 @@ func (v *FyneView) ShowStartMenu() {
 	})
 }
 
+// ShowError — отображает ошибку пользователю в GUI
 func (v *FyneView) ShowError(msg string) {
+	if msg == "" || v.window == nil {
+		return
+	}
 
+	fyne.Do(func() {
+		dialog.ShowError(
+			fmt.Errorf("%s", msg),
+			v.window,
+		)
+	})
 }
 
 func (v *FyneView) ShowGames() {
+	v.window.Canvas().SetOnTypedKey(nil)
 
 	v.games = v.client.GamesSnapshot()
 
@@ -124,6 +137,7 @@ func (v *FyneView) RefreshRating() {
 	fyne.Do(func() {
 		v.players = v.currentGame.PlayersSnapshot()
 		v.ratingList.Refresh()
+		v.refreshGameInfo()
 	})
 }
 
@@ -195,6 +209,7 @@ func (v *FyneView) showJoinDialog(g application.DiscoveredGame) {
 }
 
 func (v *FyneView) ShowConfigMenu() {
+	v.window.Canvas().SetOnTypedKey(nil)
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder("Имя игрока")
 
@@ -260,7 +275,7 @@ func (v *FyneView) ShowGameScreen(game *domain.Game) {
 		v.currentGame = game
 
 		// слева – поле
-		v.boardWidget = NewBoardWidget(game.Board)
+		v.boardWidget = NewBoardWidget(game)
 		boardContainer := container.NewStack(v.boardWidget)
 
 		// ==== справа – панель ====
@@ -293,11 +308,12 @@ func (v *FyneView) ShowGameScreen(game *domain.Game) {
 		v.gameInfoLabel = widget.NewLabel(
 			fmt.Sprintf("Ведущий: ?\nРазмер: %dx%d\nЕда: %d+1x", cfg.Width, cfg.Height, cfg.FoodStatic),
 		)
+		v.refreshGameInfo()
 		currentGameBox := container.NewVBox(currentGameTitle, v.gameInfoLabel)
 
 		// Кнопки "Выход" и "Новая игра"
 		exitBtn := widget.NewButton("Выход", func() {
-			v.client.BackToStart()
+			v.client.LeaveGame()
 		})
 		newGameBtn := widget.NewButton("Новая игра", func() {
 			v.client.NewGameFromInGame()
@@ -375,6 +391,23 @@ func (v *FyneView) RefreshBoard() {
 
 	fyne.Do(func() {
 		v.boardWidget.Refresh()
+		v.refreshGameInfo()
 	})
 
+}
+
+func (v *FyneView) refreshGameInfo() {
+	if v.currentGame == nil || v.gameInfoLabel == nil {
+		return
+	}
+	cfg := v.currentGame.Config()
+	master := v.currentGame.MasterName()
+	if master == "" {
+		master = "?"
+	}
+	v.gameInfoLabel.SetText(
+		fmt.Sprintf("Ведущий: %s\nРазмер: %dx%d\nЕда: %d+1x",
+			master, cfg.Width, cfg.Height, cfg.FoodStatic,
+		),
+	)
 }

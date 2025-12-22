@@ -44,31 +44,92 @@ func (c *GameClient) buildJoinMessage(playerName string, g DiscoveredGame, mode 
 	}
 }
 
+// запрет подключаться в игру, в которой ты уже есть
+func sameAddr(a, b *net.UDPAddr) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.IP.Equal(b.IP) && a.Port == b.Port
+}
+
+func (c *GameClient) removeDiscoveredGame(g DiscoveredGame) {
+	c.gamesMu.Lock()
+	defer c.gamesMu.Unlock()
+
+	for k, dg := range c.games {
+		if dg == nil {
+			continue
+		}
+		if dg.GameName == g.GameName && dg.Host == g.Host {
+			delete(c.games, k)
+		}
+	}
+}
+
 // Клиент отправляет Join мастеру с надёжной доставкой (ожидает Ack).
 func (c *GameClient) JoinGame(playerName string, g DiscoveredGame, mode string) error {
+	//нельзя подключиться к игре, в которой уже находишься
+	if c.isInGame() && g.GameName == c.GameName {
+		return fmt.Errorf("нельзя подключиться к игре, в которой уже находишься")
+	}
+	//гасим все предыдущие тикеры
+	if c.isInGame() {
+		c.fullShutdown()
+	}
+	// уже в этой игре — не даём повторно джойниться
+	if c.isInGame() && c.GameName == g.GameName && sameAddr(c.node.MasterAddr, g.Addr) {
+		return fmt.Errorf("уже подключен к этой игре")
+	}
+
+	c.node.SelfID = 0
+	c.node.SelfRole = snakespb.NodeRole_NORMAL
+	c.node.MasterID = 0
+	c.node.MasterAddr = g.Addr
+	c.node.DeputyID = 0
+	c.node.DeputyAddr = nil
+
+	c.lastStateOrder = 0
+
+	c.stateOrderMu.Lock()
+	c.stateOrder = 0
+	c.stateOrderMu.Unlock()
+
+	c.clearAllPending(fmt.Errorf("rejoin"))
+
 	if c.network == nil {
 		return fmt.Errorf("no network transport")
 	}
 
+	// ВАЖНО: воркеры должны работать ДО надежной отправки join
+	c.ensureSendWorkers()
+
+	c.setInGame(true)
+
+	c.startReliabilityLoop(c.reliabilityInterval())
+
 	c.node.MasterAddr = g.Addr
 	c.node.MasterID = 0
 	c.node.SelfRole = snakespb.NodeRole_NORMAL
+	c.GameName = g.GameName
 
 	msg := c.buildJoinMessage(playerName, g, mode)
 	if msg == nil {
+		c.setInGame(false)
 		return fmt.Errorf("cannot build join message")
 	}
 
-	c.log.Printf("JOIN sending: name=%s game=%s addr=%s",
-		playerName, g.GameName, g.Addr)
-
-	// По протоколу: retry interval ~= state_delay_ms / 10.
-	// У тебя тут нет delay в DiscoveredGame, поэтому пока жёстко:
 	retryInterval := 100 * time.Millisecond
 	maxAttempts := 2
+	wait := 2 * time.Second
 
-	if err := c.sendReliable(msg, g.Addr, 0, retryInterval, maxAttempts); err != nil {
-		return fmt.Errorf("join: no ack from master: %w", err)
+	if err := c.reliableSendWait(msg, g.Addr, 0, retryInterval, maxAttempts, wait); err != nil {
+		c.removeDiscoveredGame(g)
+		if c.view != nil { // чтобы UI сразу обновился
+			c.view.RefreshGamesList()
+			c.view.RefreshAvailableGames()
+		}
+		c.fullShutdown()
+		return fmt.Errorf("join: %w", err)
 	}
 
 	cfg := domain.GameConfig{
@@ -78,7 +139,8 @@ func (c *GameClient) JoinGame(playerName string, g DiscoveredGame, mode string) 
 		StateDelayMs: g.StateDelayMs,
 	}
 	c.game = domain.NewGame(cfg)
-
+	c.ensureSendWorkers()
+	c.setInGame(true)
 	if c.view != nil {
 		c.view.ShowGameScreen(c.game)
 	}
