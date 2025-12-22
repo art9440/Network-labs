@@ -1,0 +1,35 @@
+"filename", "language", "Go Module File", "Go", "Go Checksum File", "comment", "blank", "total"
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/cmd/app/main.go", "Go", 0, 25, 0, 8, 13, 46
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/go.mod", "Go Module File", 44, 0, 0, 0, 5, 49
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/go.sum", "Go Checksum File", 0, 0, 125, 0, 1, 126
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/ack.go", "Go", 0, 30, 0, 1, 8, 39
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/announce.go", "Go", 0, 132, 0, 1, 29, 162
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/client.go", "Go", 0, 93, 0, 15, 33, 141
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/clientGame.go", "Go", 0, 89, 0, 5, 18, 112
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/clientNet.go", "Go", 0, 155, 0, 23, 31, 209
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/clientUI.go", "Go", 0, 100, 0, 23, 29, 152
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/dispatch.go", "Go", 0, 135, 0, 5, 19, 159
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/error.go", "Go", 0, 31, 0, 0, 7, 38
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/join.go", "Go", 0, 127, 0, 7, 35, 169
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/monitor.go", "Go", 0, 340, 0, 49, 76, 465
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/pending.go", "Go", 0, 112, 0, 17, 25, 154
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/ping.go", "Go", 0, 23, 0, 1, 7, 31
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/queue.go", "Go", 0, 55, 0, 9, 8, 72
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/role.go", "Go", 0, 50, 0, 7, 14, 71
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/state.go", "Go", 0, 343, 0, 35, 62, 440
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/steer.go", "Go", 0, 89, 0, 2, 18, 109
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/transport.go", "Go", 0, 10, 0, 0, 3, 13
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/types.go", "Go", 0, 26, 0, 0, 8, 34
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/view.go", "Go", 0, 13, 0, 0, 3, 16
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/board.go", "Go", 0, 27, 0, 0, 6, 33
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/colors.go", "Go", 0, 13, 0, 0, 4, 17
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/game.go", "Go", 0, 365, 0, 41, 71, 477
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/gameConfig.go", "Go", 0, 10, 0, 0, 3, 13
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/player.go", "Go", 0, 16, 0, 0, 5, 21
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/snake.go", "Go", 0, 7, 0, 0, 2, 9
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/type.go", "Go", 0, 13, 0, 0, 5, 18
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/infrastructure/gui/boardWidget.go", "Go", 0, 104, 0, 1, 14, 119
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/infrastructure/gui/fyeneView.go", "Go", 0, 334, 0, 9, 71, 414
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/infrastructure/network/transport.go", "Go", 0, 158, 0, 16, 32, 206
+"/home/art9440/VScodeProjects/GO/network-labs/lab4/internal/infrastructure/proto/snakes.pb.go", "Go", 0, 1311, 0, 84, 226, 1621
+"Total", "-", 44, 4336, 125, 359, 891, 5755

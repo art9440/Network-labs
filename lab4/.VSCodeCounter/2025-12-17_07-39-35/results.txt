@@ -1,0 +1,69 @@
+Date : 2025-12-17 07:39:35
+Directory : /home/art9440/VScodeProjects/GO/network-labs/lab4
+Total : 33 files,  4505 codes, 359 comments, 891 blanks, all 5755 lines
+
+Languages
++------------------+------------+------------+------------+------------+------------+
+| language         | files      | code       | comment    | blank      | total      |
++------------------+------------+------------+------------+------------+------------+
+| Go               |         31 |      4,336 |        359 |        885 |      5,580 |
+| Go Checksum File |          1 |        125 |          0 |          1 |        126 |
+| Go Module File   |          1 |         44 |          0 |          5 |         49 |
++------------------+------------+------------+------------+------------+------------+
+
+Directories
++------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                                           | files      | code       | comment    | blank      | total      |
++------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                                              |         33 |      4,505 |        359 |        891 |      5,755 |
+| . (Files)                                                                                      |          2 |        169 |          0 |          6 |        175 |
+| cmd                                                                                            |          1 |         25 |          8 |         13 |         46 |
+| cmd/app                                                                                        |          1 |         25 |          8 |         13 |         46 |
+| internal                                                                                       |         30 |      4,311 |        351 |        872 |      5,534 |
+| internal/application                                                                           |         19 |      1,953 |        200 |        433 |      2,586 |
+| internal/domain                                                                                |          7 |        451 |         41 |         96 |        588 |
+| internal/infrastructure                                                                        |          4 |      1,907 |        110 |        343 |      2,360 |
+| internal/infrastructure/gui                                                                    |          2 |        438 |         10 |         85 |        533 |
+| internal/infrastructure/network                                                                |          1 |        158 |         16 |         32 |        206 |
+| internal/infrastructure/proto                                                                  |          1 |      1,311 |         84 |        226 |      1,621 |
++------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++------------------------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+
+| filename                                                                                       | language         | code       | comment    | blank      | total      |
++------------------------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/cmd/app/main.go                              | Go               |         25 |          8 |         13 |         46 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/go.mod                                       | Go Module File   |         44 |          0 |          5 |         49 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/go.sum                                       | Go Checksum File |        125 |          0 |          1 |        126 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/ack.go                  | Go               |         30 |          1 |          8 |         39 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/announce.go             | Go               |        132 |          1 |         29 |        162 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/client.go               | Go               |         93 |         15 |         33 |        141 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/clientGame.go           | Go               |         89 |          5 |         18 |        112 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/clientNet.go            | Go               |        155 |         23 |         31 |        209 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/clientUI.go             | Go               |        100 |         23 |         29 |        152 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/dispatch.go             | Go               |        135 |          5 |         19 |        159 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/error.go                | Go               |         31 |          0 |          7 |         38 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/join.go                 | Go               |        127 |          7 |         35 |        169 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/monitor.go              | Go               |        340 |         49 |         76 |        465 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/pending.go              | Go               |        112 |         17 |         25 |        154 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/ping.go                 | Go               |         23 |          1 |          7 |         31 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/queue.go                | Go               |         55 |          9 |          8 |         72 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/role.go                 | Go               |         50 |          7 |         14 |         71 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/state.go                | Go               |        343 |         35 |         62 |        440 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/steer.go                | Go               |         89 |          2 |         18 |        109 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/transport.go            | Go               |         10 |          0 |          3 |         13 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/types.go                | Go               |         26 |          0 |          8 |         34 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/application/view.go                 | Go               |         13 |          0 |          3 |         16 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/board.go                     | Go               |         27 |          0 |          6 |         33 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/colors.go                    | Go               |         13 |          0 |          4 |         17 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/game.go                      | Go               |        365 |         41 |         71 |        477 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/gameConfig.go                | Go               |         10 |          0 |          3 |         13 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/player.go                    | Go               |         16 |          0 |          5 |         21 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/snake.go                     | Go               |          7 |          0 |          2 |          9 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/domain/type.go                      | Go               |         13 |          0 |          5 |         18 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/infrastructure/gui/boardWidget.go   | Go               |        104 |          1 |         14 |        119 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/infrastructure/gui/fyeneView.go     | Go               |        334 |          9 |         71 |        414 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/infrastructure/network/transport.go | Go               |        158 |         16 |         32 |        206 |
+| /home/art9440/VScodeProjects/GO/network-labs/lab4/internal/infrastructure/proto/snakes.pb.go   | Go               |      1,311 |         84 |        226 |      1,621 |
+| Total                                                                                          |                  |      4,505 |        359 |        891 |      5,755 |
++------------------------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+
